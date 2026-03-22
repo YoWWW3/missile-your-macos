@@ -1,0 +1,205 @@
+#!/usr/bin/env bash
+#
+# mym — Missile Your macOS CLI
+#
+# A unified command to safely back up everything before erasing macOS.
+#
+# Usage:
+#   mym [command] [options] [arguments]
+#
+# Commands:
+#   config   [dest]    Back up developer configs (SSH, Git, editors, CLIs…) to a ZIP
+#   dry-run  [dir]     Preview which Git projects will be archived (no changes made)
+#   execute  [dir]     Archive all Git projects and move originals to macOS Trash
+#
+# Options:
+#   -h, --help         Show this help message and exit
+#   -v, --version      Show version information and exit
+#   --no-color         Disable colored output
+#
+# Examples:
+#   mym config                           # Backup configs to ~/Desktop
+#   mym config /Volumes/ExternalDrive    # Backup configs to an external drive
+#   mym dry-run                          # Preview project backups in current directory
+#   mym dry-run ~/Projects               # Preview project backups in ~/Projects
+#   mym execute                          # Archive projects in current directory
+#   mym execute ~/Projects               # Archive projects in ~/Projects
+
+set -euo pipefail
+
+# ─── Version ─────────────────────────────────────────────────────────────────
+
+VERSION="1.0.0"
+
+# ─── Locate sibling scripts ───────────────────────────────────────────────────
+# Works whether run directly from the repo, symlinked via Homebrew, or installed
+# to /usr/local/bin — always resolves the real directory of this script.
+
+_resolve_dir() {
+    local src="$1"
+    while [ -L "$src" ]; do
+        local dir
+        dir="$(cd -P "$(dirname "$src")" && pwd)"
+        src="$(readlink "$src")"
+        [[ "$src" != /* ]] && src="$dir/$src"
+    done
+    cd -P "$(dirname "$src")" && pwd
+}
+
+SCRIPT_DIR="$(_resolve_dir "${BASH_SOURCE[0]}")"
+# Homebrew installs scripts to libexec; bin/mym is one level above the .sh files.
+# Fallback order: <prefix>/libexec → parent of bin/ → same directory as mym
+_find_script() {
+    local name="$1"
+    local candidates=(
+        "$SCRIPT_DIR/../libexec/$name"
+        "$SCRIPT_DIR/../$name"
+        "$SCRIPT_DIR/$name"
+    )
+    for p in "${candidates[@]}"; do
+        if [ -f "$p" ]; then
+            echo "$(cd "$(dirname "$p")" && pwd)/$(basename "$p")"
+            return 0
+        fi
+    done
+    return 1
+}
+
+SCRIPT_CONFIG="$(_find_script "backup-config.sh"          || true)"
+SCRIPT_DRY="$(_find_script    "backup-projects-dry-run.sh" || true)"
+SCRIPT_EXEC="$(_find_script   "backup-projects-execute.sh" || true)"
+
+# ─── Colors ───────────────────────────────────────────────────────────────────
+
+NO_COLOR="${NO_COLOR:-}"
+if [ -t 1 ] && [ -z "$NO_COLOR" ]; then
+    BOLD='\033[1m'
+    GREEN='\033[0;32m'
+    CYAN='\033[0;36m'
+    YELLOW='\033[1;33m'
+    RED='\033[0;31m'
+    NC='\033[0m'
+else
+    BOLD='' GREEN='' CYAN='' YELLOW='' RED='' NC=''
+fi
+
+# ─── Helpers ──────────────────────────────────────────────────────────────────
+
+_usage() {
+    cat <<EOF
+
+${BOLD}mym — Missile Your macOS${NC}  v${VERSION}
+
+${BOLD}USAGE${NC}
+  mym <command> [options] [arguments]
+
+${BOLD}COMMANDS${NC}
+  ${GREEN}config${NC}   [dest]   Back up all developer configs into a timestamped ZIP
+                   Default destination: ~/Desktop
+  ${GREEN}dry-run${NC}  [dir]    Preview Git project backups without making changes
+                   Default directory: current directory
+  ${GREEN}execute${NC}  [dir]    Archive Git projects to ZIP and move originals to Trash
+                   Default directory: current directory
+
+${BOLD}OPTIONS${NC}
+  -h, --help       Show this help message and exit
+  -v, --version    Show version information and exit
+  --no-color       Disable colored output (also respected via \$NO_COLOR env var)
+
+${BOLD}EXAMPLES${NC}
+  mym config                         # Backup configs to ~/Desktop
+  mym config /Volumes/ExternalDrive  # Backup configs to an external drive
+  mym dry-run                        # Preview backups in current directory
+  mym dry-run ~/Projects             # Preview backups in ~/Projects
+  mym execute                        # Archive projects in current directory
+  mym execute ~/Projects             # Archive projects in ~/Projects
+
+${BOLD}PROJECT${NC}
+  https://github.com/YoWWW3/missile-your-macos
+
+EOF
+}
+
+_version() {
+    echo "mym version $VERSION"
+}
+
+_require_script() {
+    local var="$1"
+    local name="$2"
+    if [ -z "$var" ] || [ ! -f "$var" ]; then
+        echo -e "${RED}Error:${NC} Cannot find $name." >&2
+        echo "  Expected it near: $SCRIPT_DIR" >&2
+        echo "  Install via Homebrew or clone the repository." >&2
+        exit 1
+    fi
+    if [ ! -x "$var" ]; then
+        chmod +x "$var"
+    fi
+}
+
+# ─── Argument parsing ─────────────────────────────────────────────────────────
+
+if [ $# -eq 0 ]; then
+    _usage
+    exit 0
+fi
+
+COMMAND=""
+PASSTHROUGH_ARGS=()
+
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        -h|--help)
+            _usage
+            exit 0
+            ;;
+        -v|--version)
+            _version
+            exit 0
+            ;;
+        --no-color)
+            NO_COLOR=1
+            BOLD='' GREEN='' CYAN='' YELLOW='' RED='' NC=''
+            shift
+            ;;
+        config|dry-run|dry|execute|exec)
+            COMMAND="$1"
+            shift
+            PASSTHROUGH_ARGS=("$@")
+            break
+            ;;
+        -*)
+            echo -e "${RED}Error:${NC} Unknown option: $1" >&2
+            echo "Run 'mym --help' for usage." >&2
+            exit 1
+            ;;
+        *)
+            echo -e "${RED}Error:${NC} Unknown command: $1" >&2
+            echo "Run 'mym --help' for usage." >&2
+            exit 1
+            ;;
+    esac
+done
+
+# ─── Dispatch ─────────────────────────────────────────────────────────────────
+
+case "$COMMAND" in
+    config)
+        _require_script "$SCRIPT_CONFIG" "backup-config.sh"
+        exec "$SCRIPT_CONFIG" "${PASSTHROUGH_ARGS[@]+"${PASSTHROUGH_ARGS[@]}"}"
+        ;;
+    dry-run|dry)
+        _require_script "$SCRIPT_DRY" "backup-projects-dry-run.sh"
+        exec "$SCRIPT_DRY" "${PASSTHROUGH_ARGS[@]+"${PASSTHROUGH_ARGS[@]}"}"
+        ;;
+    execute|exec)
+        _require_script "$SCRIPT_EXEC" "backup-projects-execute.sh"
+        exec "$SCRIPT_EXEC" "${PASSTHROUGH_ARGS[@]+"${PASSTHROUGH_ARGS[@]}"}"
+        ;;
+    *)
+        echo -e "${RED}Error:${NC} No command specified." >&2
+        _usage
+        exit 1
+        ;;
+esac
