@@ -77,7 +77,7 @@ for git_rel in "${projects[@]}"; do
     [ "$current" -eq "$total" ] && branch="└──"
 
     # ZIP filename preview
-    TS=$(date +%Y%m%d_%H%M)
+    TS=$(date +%Y%m%d_%H%M%S)
     zip_name="${project_name// /_}_backup_$TS.zip"
 
     # Estimate size (excluding common large directories)

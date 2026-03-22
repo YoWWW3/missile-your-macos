@@ -92,16 +92,7 @@ if [[ ! "$confirm" =~ ^[Yy]$ ]]; then
     exit 0
 fi
 
-# ─── Build exclude args ─────────────────────────────────────────────────────
-
-build_exclude_args() {
-    local project_name="$1"
-    local args=()
-    for pattern in "${EXCLUDE_PATTERNS[@]}"; do
-        args+=(-x "$project_name/$pattern")
-    done
-    echo "${args[@]}"
-}
+echo ""
 
 # ─── Execute ─────────────────────────────────────────────────────────────────
 
@@ -112,7 +103,13 @@ log_msg "---"
 success_count=0
 fail_count=0
 
-find . -name ".git" -type d -print0 2>/dev/null | sort -z | while IFS= read -r -d $'\0' git_dir; do
+# Read git directories into an array to avoid subshell variable scoping issues
+git_dirs=()
+while IFS= read -r -d $'\0' git_dir; do
+    git_dirs+=("$git_dir")
+done < <(find . -name ".git" -type d -print0 2>/dev/null | sort -z)
+
+for git_dir in "${git_dirs[@]}"; do
 
     # Path calculations
     project_dir_rel=$(dirname "$git_dir")

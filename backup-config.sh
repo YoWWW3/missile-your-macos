@@ -135,6 +135,8 @@ for f in "${GIT_FILES[@]}"; do
 done
 if [ "$git_count" -eq 0 ]; then
     fail "No Git configuration files found"
+else
+    info "Total Git config files backed up: $git_count"
 fi
 echo ""
 
