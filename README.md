@@ -8,25 +8,98 @@ Wiping your Mac should be stress-free. This toolkit ensures you don't lose SSH k
 
 ## Table of Contents
 
+- [Install via Homebrew](#install-via-homebrew)
 - [Overview](#overview)
+- [mym CLI Reference](#mym-cli-reference)
 - [Before You Start — The Checklist](#before-you-start--the-checklist)
 - [Phase 1: Backup Developer Configuration](#phase-1-backup-developer-configuration)
 - [Phase 2: Backup Projects](#phase-2-backup-projects)
 - [Pre-Erase Sign-Out Guide](#pre-erase-sign-out-guide)
 - [Erasing macOS](#erasing-macos)
 - [After the Reset — Restore Guide](#after-the-reset--restore-guide)
+- [Publishing to Homebrew](#publishing-to-homebrew)
+
+---
+
+## Install via Homebrew
+
+The easiest way to get started on any Mac:
+
+```bash
+brew tap YoWWW3/missile-your-macos
+brew install mym
+```
+
+Then run `mym --help` to see all commands.
+
+> **Don't have Homebrew?**  Install it first:
+> ```bash
+> /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+> ```
+
+### Manual install (no Homebrew)
+
+```bash
+git clone https://github.com/YoWWW3/missile-your-macos.git
+cd missile-your-macos
+chmod +x bin/mym backup-config.sh backup-projects-dry-run.sh backup-projects-execute.sh
+
+# Optional: put mym on your PATH
+sudo ln -sf "$PWD/bin/mym" /usr/local/bin/mym
+```
 
 ---
 
 ## Overview
 
-This repository provides three shell scripts and a step-by-step guide:
+This repository provides a unified `mym` CLI and three underlying shell scripts:
 
-| Script | Purpose |
-|--------|---------|
+| Command / Script | Purpose |
+|-----------------|---------|
+| `mym` | Unified CLI — run `config`, `dry-run`, or `execute` with one command |
 | `backup-config.sh` | Backs up all developer configs (SSH, Git, editors, DBs, cloud CLIs, etc.) into a single ZIP |
 | `backup-projects-dry-run.sh` | Previews which Git projects will be archived (no changes made) |
 | `backup-projects-execute.sh` | Archives each Git project to ZIP and moves originals to Trash |
+
+---
+
+## mym CLI Reference
+
+```
+mym <command> [options] [arguments]
+```
+
+### Commands
+
+| Command | Argument | Description |
+|---------|----------|-------------|
+| `config` | `[dest]` | Back up all developer configs to a timestamped ZIP. Default destination: `~/Desktop` |
+| `dry-run` | `[dir]` | Preview which Git projects will be archived. Default: current directory |
+| `execute` | `[dir]` | Archive Git projects to ZIP, move originals to Trash. Default: current directory |
+
+### Options
+
+| Flag | Description |
+|------|-------------|
+| `-h`, `--help` | Show help and exit |
+| `-v`, `--version` | Show version and exit |
+| `--no-color` | Disable colored output (also honored via `$NO_COLOR` env var) |
+
+### Examples
+
+```bash
+mym --help                           # Show usage
+mym --version                        # Show version
+
+mym config                           # Backup configs → ~/Desktop
+mym config /Volumes/ExternalDrive    # Backup configs → external drive
+
+mym dry-run                          # Preview project backups in current directory
+mym dry-run ~/Projects               # Preview project backups in ~/Projects
+
+mym execute                          # Archive projects in current directory
+mym execute ~/Projects               # Archive projects in ~/Projects
+```
 
 ---
 
@@ -320,6 +393,95 @@ unzip /path/to/project_backup_*.zip
 - **Take a screenshot** of your Homebrew services (`brew services list`) and installed apps for reference.
 - **Export database data**, not just configurations. The scripts back up app settings, but your actual data (tables, records) needs separate export.
 - **Keep your backup ZIP files** for at least a few weeks after the reset, in case you forgot something.
+
+---
+
+## Publishing to Homebrew
+
+This section is for **maintainers** who want to publish `mym` to a Homebrew tap so users can install it with `brew install mym`.
+
+### Step 1 — Create a GitHub Release
+
+Tag and release the version:
+
+```bash
+git tag v1.0.0
+git push origin v1.0.0
+```
+
+Then go to **GitHub → Releases → Draft a new release**, select the tag, add release notes, and publish.
+
+### Step 2 — Get the Tarball SHA256
+
+GitHub automatically creates a source tarball for every release. Compute its hash:
+
+```bash
+curl -sL https://github.com/YoWWW3/missile-your-macos/archive/refs/tags/v1.0.0.tar.gz \
+  | shasum -a 256
+```
+
+Copy the 64-character hash.
+
+### Step 3 — Update the Formula
+
+Edit `Formula/mym.rb` and replace the two placeholders:
+
+```ruby
+url "https://github.com/YoWWW3/missile-your-macos/archive/refs/tags/v1.0.0.tar.gz"
+sha256 "REPLACE_WITH_ACTUAL_SHA256_OF_v1.0.0_TARBALL"   # ← paste the hash here
+```
+
+### Step 4 — Create a Homebrew Tap Repository
+
+A Homebrew tap is just a public GitHub repository whose name starts with `homebrew-`.
+
+```bash
+# Create a new repo called homebrew-missile-your-macos on GitHub, then:
+mkdir homebrew-missile-your-macos && cd homebrew-missile-your-macos
+git init
+mkdir Formula
+cp /path/to/missile-your-macos/Formula/mym.rb Formula/mym.rb
+git add .
+git commit -m "Add mym formula v1.0.0"
+git remote add origin https://github.com/YoWWW3/homebrew-missile-your-macos.git
+git push -u origin main
+```
+
+### Step 5 — Verify the Formula Locally
+
+Before publishing, test the formula on your Mac:
+
+```bash
+# Audit for style issues
+brew audit --strict Formula/mym.rb
+
+# Dry-run install (no network)
+brew install --dry-run Formula/mym.rb
+
+# Full local install
+brew install --build-from-source Formula/mym.rb
+
+# Run the built-in tests
+brew test mym
+```
+
+### Step 6 — Install (End-User Flow)
+
+Once the tap repository is live, anyone can install with:
+
+```bash
+brew tap YoWWW3/missile-your-macos
+brew install mym
+mym --help
+```
+
+### Updating to a New Version
+
+1. Bump the version in `bin/mym` (`VERSION="1.x.x"`)
+2. Tag and push the new release
+3. Compute the new SHA256
+4. Update `Formula/mym.rb` (`url`, `sha256`, `version`)
+5. Commit and push the updated formula to the tap repository
 
 ---
 
